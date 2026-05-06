@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabase } from "@/lib/supabase";
+import { pass1Extract } from "./passes/pass1-extract";
+import { pass2Compress } from "./passes/pass2-compress";
+import { pass3Profile } from "./passes/pass3-profile";
+import { pass4Opportunity } from "./passes/pass4-opportunity";
+import { AtomicEvent, TimelineEvent, StableProfile } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   const { raw_text, intent } = await req.json();
 
-  let inputId: string | null = null;
+  const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY!,
+  });
 
-  // Save raw input to Supabase (if configured)
+  // Save raw input
+  let inputId: string | null = null;
   if (supabase) {
     const { data: input } = await supabase
       .from("inputs")
@@ -17,67 +25,102 @@ export async function POST(req: NextRequest) {
     inputId = input?.id ?? null;
   }
 
-  // Call Claude to extract and structure timeline
-  const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-  });
+  // Pass 1: Raw text → Atomic events
+  console.log("\n--- Pass 1: Extracting atomic events ---");
+  const { events, thinking: t1 } = await pass1Extract(anthropic, raw_text);
+  console.log(`Extracted ${events.length} atomic events`);
+  console.log("Thinking:", t1.slice(0, 200), "...\n");
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    system: `You are a biographical intelligence system. You extract life events from raw text and structure them into a compressed timeline.
-
-Rules:
-- Each event represents a meaningful shift, not a sentence summary
-- Titles must be sharp and specific (like essay section headers)
-- Narratives are 2-4 sentences max, compressed and precise
-- Infer time periods when not explicitly stated
-- No generic summaries, no vague phrases
-- You are building a representation of a human trajectory
-
-Return valid JSON only, no markdown wrapping.`,
-    messages: [
-      {
-        role: "user",
-        content: `${intent ? `Intent: ${intent}\n\n` : ""}Raw text:\n${raw_text}
-
-Extract a timeline of life events/phases. Return JSON in this exact format:
-{
-  "timeline": [
-    { "id": "unique-id", "time": "time period", "title": "sharp title", "narrative": "2-4 sentences" }
-  ],
-  "themes": ["theme1", "theme2", "theme3"]
-}`,
-      },
-    ],
-  });
-
-  const content = message.content[0];
-  if (content.type !== "text") {
-    return NextResponse.json({ error: "Unexpected response" }, { status: 500 });
+  if (supabase && inputId) {
+    const rows = events.map((e: AtomicEvent, i: number) => ({
+      input_id: inputId,
+      date_approx: e.date_approx,
+      category: e.category,
+      actor: e.actor,
+      action: e.action,
+      context: e.context,
+      significance: e.significance,
+      sort_order: i,
+    }));
+    await supabase.from("atomic_events").insert(rows);
   }
 
-  const parsed = JSON.parse(content.text);
+  // Pass 2: Atomic events → Timeline + themes
+  console.log("--- Pass 2: Compressing to timeline ---");
+  const { timeline, themes, thinking: t2 } = await pass2Compress(anthropic, events);
+  console.log(`Compressed to ${timeline.length} phases, ${themes.length} themes`);
+  console.log("Thinking:", t2.slice(0, 200), "...\n");
 
-  // Save timeline events to Supabase (if configured)
-  if (supabase && inputId && parsed.timeline) {
-    const events = parsed.timeline.map((e: { id: string; time: string; title: string; narrative: string }, i: number) => ({
+  if (supabase && inputId) {
+    const rows = timeline.map((e: TimelineEvent, i: number) => ({
       input_id: inputId,
       time: e.time,
       title: e.title,
       narrative: e.narrative,
       sort_order: i,
     }));
-    await supabase.from("timeline_events").insert(events);
+    await supabase.from("timeline_events").insert(rows);
+    const themeRows = themes.map((label: string) => ({ input_id: inputId, label }));
+    await supabase.from("themes").insert(themeRows);
   }
 
-  if (supabase && inputId && parsed.themes) {
-    const themes = parsed.themes.map((label: string) => ({
+  // Pass 3: Timeline → Stable profile
+  console.log("--- Pass 3: Extracting stable profile ---");
+  const { profile, thinking: t3 } = await pass3Profile(anthropic, timeline, themes);
+  console.log("Profile extracted");
+  console.log("Thinking:", t3.slice(0, 200), "...\n");
+
+  if (supabase && inputId) {
+    await supabase.from("profiles").insert({
       input_id: inputId,
-      label,
-    }));
-    await supabase.from("themes").insert(themes);
+      core_pattern: profile.core_pattern,
+      operating_mode: profile.operating_mode,
+      obsessions: profile.obsessions,
+      commercial_surfaces: profile.commercial_surfaces,
+      collaboration_style: profile.collaboration_style,
+      risk_flags: profile.risk_flags,
+      proof_of_work: profile.proof_of_work,
+      network_surface: profile.network_surface,
+      current_leverage_point: profile.current_leverage_point,
+    });
   }
 
-  return NextResponse.json(parsed);
+  // Pass 4: Profile + intent → Opportunity (conditional)
+  let opportunity = undefined;
+  let t4 = undefined;
+  if (intent) {
+    console.log("--- Pass 4: Mapping opportunities ---");
+    const result = await pass4Opportunity(anthropic, profile, intent);
+    opportunity = result.opportunity;
+    t4 = result.thinking;
+    console.log("Opportunity profile generated");
+    console.log("Thinking:", t4.slice(0, 200), "...\n");
+
+    if (supabase && inputId) {
+      await supabase.from("opportunity_profiles").insert({
+        input_id: inputId,
+        intent: opportunity.intent,
+        opportunity_queries: opportunity.opportunity_queries,
+        likely_buyers: opportunity.likely_buyers,
+        collaboration_matches: opportunity.collaboration_matches,
+        positioning: opportunity.positioning,
+      });
+    }
+  }
+
+  // Save all thinking to input record
+  if (supabase && inputId) {
+    await supabase.from("inputs").update({
+      reasoning: JSON.stringify({ pass1: t1, pass2: t2, pass3: t3, pass4: t4 }),
+    }).eq("id", inputId);
+  }
+
+  return NextResponse.json({
+    atomic_events: events,
+    timeline,
+    themes,
+    profile,
+    opportunity,
+    thinking: { pass1: t1, pass2: t2, pass3: t3, pass4: t4 },
+  });
 }

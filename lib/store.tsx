@@ -1,36 +1,56 @@
 "use client";
 
 import { createContext, useContext, useState, ReactNode } from "react";
-import { TimelineEvent } from "./types";
+import {
+  AtomicEvent,
+  TimelineEvent,
+  StableProfile,
+  OpportunityProfile,
+  PipelineResponse,
+} from "./types";
 
-interface TimelineState {
+interface PipelineState {
+  atomicEvents: AtomicEvent[] | null;
   timeline: TimelineEvent[] | null;
   themes: string[] | null;
-  setData: (timeline: TimelineEvent[], themes: string[]) => void;
+  profile: StableProfile | null;
+  opportunity: OpportunityProfile | null;
+  setData: (data: PipelineResponse) => void;
 }
 
-const TimelineContext = createContext<TimelineState>({
+const PipelineContext = createContext<PipelineState>({
+  atomicEvents: null,
   timeline: null,
   themes: null,
+  profile: null,
+  opportunity: null,
   setData: () => {},
 });
 
 export function TimelineProvider({ children }: { children: ReactNode }) {
+  const [atomicEvents, setAtomicEvents] = useState<AtomicEvent[] | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[] | null>(null);
   const [themes, setThemes] = useState<string[] | null>(null);
+  const [profile, setProfile] = useState<StableProfile | null>(null);
+  const [opportunity, setOpportunity] = useState<OpportunityProfile | null>(null);
 
-  const setData = (t: TimelineEvent[], th: string[]) => {
-    setTimeline(t);
-    setThemes(th);
+  const setData = (data: PipelineResponse) => {
+    setAtomicEvents(data.atomic_events);
+    setTimeline(data.timeline);
+    setThemes(data.themes);
+    setProfile(data.profile);
+    setOpportunity(data.opportunity ?? null);
   };
 
   return (
-    <TimelineContext.Provider value={{ timeline, themes, setData }}>
+    <PipelineContext.Provider
+      value={{ atomicEvents, timeline, themes, profile, opportunity, setData }}
+    >
       {children}
-    </TimelineContext.Provider>
+    </PipelineContext.Provider>
   );
 }
 
-export function useTimeline() {
-  return useContext(TimelineContext);
+export function usePipeline() {
+  return useContext(PipelineContext);
 }

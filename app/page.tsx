@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { InputBox } from "@/components/InputBox";
 import { DocumentBlock } from "@/components/DocumentBlock";
 import { SubmitButton } from "@/components/SubmitButton";
-import { useTimeline } from "@/lib/store";
+import { usePipeline } from "@/lib/store";
 
 interface DocBlock {
   id: string;
@@ -19,7 +19,7 @@ export default function InputPage() {
   const [text, setText] = useState("");
   const [intent, setIntent] = useState("");
   const [loading, setLoading] = useState(false);
-  const { setData } = useTimeline();
+  const { setData } = usePipeline();
   const router = useRouter();
 
   const handlePaste = (pastedText: string) => {
@@ -47,9 +47,12 @@ export default function InputPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ raw_text: rawText, intent: intent || undefined }),
       });
+      if (!res.ok) throw new Error("Parse failed");
       const data = await res.json();
-      setData(data.timeline, data.themes);
+      setData(data);
       router.push("/timeline");
+    } catch {
+      alert("Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }

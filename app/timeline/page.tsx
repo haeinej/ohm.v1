@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useTimeline } from "@/lib/store";
+import { usePipeline } from "@/lib/store";
 import { TimelineContainer } from "@/components/TimelineContainer";
+import { ProfileSection } from "@/components/ProfileSection";
+import { OpportunitySection } from "@/components/OpportunitySection";
 
 export default function TimelinePage() {
-  const { timeline, themes } = useTimeline();
+  const { timeline, themes, profile, opportunity } = usePipeline();
 
   if (!timeline) {
     return (
@@ -27,6 +29,8 @@ export default function TimelinePage() {
         </div>
       )}
       <TimelineContainer events={timeline} />
+      {profile && <ProfileSection profile={profile} />}
+      {opportunity && <OpportunitySection data={opportunity} />}
     </main>
   );
 }
