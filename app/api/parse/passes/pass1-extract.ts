@@ -1,12 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { AtomicEvent } from "@/lib/types";
+import { MODEL } from "@/lib/constants";
+import { extractBlocks, parseJSON } from "@/lib/llm";
 
 export async function pass1Extract(
   anthropic: Anthropic,
   rawText: string
 ): Promise<{ events: AtomicEvent[]; thinking: string }> {
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
+    model: MODEL,
     max_tokens: 12000,
     thinking: { type: "enabled", budget_tokens: 8000 },
     messages: [
@@ -16,14 +18,16 @@ export async function pass1Extract(
 
 For each event extract:
 - id: a short unique slug (e.g. "rejected-med-school-2022")
-- date_approx: best guess date or range ("2022", "2019-Q3", "early childhood")
+- date_approx: best guess date or range ("2022", "2019-Q3", "early childhood"). Use "unknown" if no clue.
 - category: one of career, education, relationship, project, insight, crisis, other
 - actor: who did this (name or "subject")
 - action: verb phrase of what happened
 - context: ONE sentence of surrounding context
 - significance: 1-5 (5 = life-altering shift, 1 = minor detail)
 
-Return valid JSON only, no markdown wrapping:
+If the text contains no discernible events, return: { "events": [] }
+
+Return valid JSON only, no markdown wrapping, no code fences:
 { "events": [ { "id": "...", "date_approx": "...", "category": "...", "actor": "...", "action": "...", "context": "...", "significance": 3 } ] }
 
 Text:
@@ -32,14 +36,7 @@ ${rawText}`,
     ],
   });
 
-  let thinking = "";
-  let text = "";
-  for (const block of message.content) {
-    if (block.type === "thinking") thinking = block.thinking;
-    else if (block.type === "text") text = block.text;
-  }
-
-  const raw = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-  const parsed = JSON.parse(raw);
-  return { events: parsed.events, thinking };
+  const { thinking, text } = extractBlocks(message);
+  const parsed = parseJSON<{ events: AtomicEvent[] }>(text);
+  return { events: parsed.events ?? [], thinking };
 }

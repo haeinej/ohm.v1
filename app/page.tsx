@@ -26,7 +26,7 @@ export default function InputPage() {
     const block: DocBlock = {
       id: crypto.randomUUID(),
       preview: pastedText.slice(0, 60),
-      wordCount: pastedText.split(/\s+/).length,
+      wordCount: pastedText.split(/\s+/).filter(Boolean).length,
       fullText: pastedText,
     };
     setBlocks((prev) => [...prev, block]);
@@ -47,12 +47,18 @@ export default function InputPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ raw_text: rawText, intent: intent || undefined }),
       });
-      if (!res.ok) throw new Error("Parse failed");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Parse failed");
+      }
       const data = await res.json();
+      if (!data.timeline || !data.profile) {
+        throw new Error("Incomplete response from server");
+      }
       setData(data);
       router.push("/timeline");
-    } catch {
-      alert("Something went wrong. Try again.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }

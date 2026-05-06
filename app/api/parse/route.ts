@@ -5,10 +5,28 @@ import { pass1Extract } from "./passes/pass1-extract";
 import { pass2Compress } from "./passes/pass2-compress";
 import { pass3Profile } from "./passes/pass3-profile";
 import { pass4Opportunity } from "./passes/pass4-opportunity";
-import { AtomicEvent, TimelineEvent, StableProfile } from "@/lib/types";
+import { AtomicEvent, TimelineEvent } from "@/lib/types";
+
+async function dbInsert(table: string, data: Record<string, unknown> | Record<string, unknown>[]) {
+  if (!supabase) return;
+  const { error } = await supabase.from(table).insert(data);
+  if (error) console.error(`[DB] Failed to insert into ${table}:`, error.message);
+}
+
+async function dbUpdate(table: string, data: Record<string, unknown>, id: string) {
+  if (!supabase) return;
+  const { error } = await supabase.from(table).update(data).eq("id", id);
+  if (error) console.error(`[DB] Failed to update ${table}:`, error.message);
+}
 
 export async function POST(req: NextRequest) {
-  const { raw_text, intent } = await req.json();
+  const body = await req.json();
+  const raw_text = body.raw_text;
+  const intent = typeof body.intent === "string" ? body.intent.trim() || null : null;
+
+  if (!raw_text || typeof raw_text !== "string" || !raw_text.trim()) {
+    return NextResponse.json({ error: "raw_text is required" }, { status: 400 });
+  }
 
   const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -17,21 +35,33 @@ export async function POST(req: NextRequest) {
   // Save raw input
   let inputId: string | null = null;
   if (supabase) {
-    const { data: input } = await supabase
+    const { data: input, error } = await supabase
       .from("inputs")
       .insert({ raw_text, intent })
       .select("id")
       .single();
-    inputId = input?.id ?? null;
+    if (error) {
+      console.error("[DB] Failed to save input:", error.message);
+    } else {
+      inputId = input.id;
+    }
   }
 
   // Pass 1: Raw text → Atomic events
   console.log("\n--- Pass 1: Extracting atomic events ---");
-  const { events, thinking: t1 } = await pass1Extract(anthropic, raw_text);
-  console.log(`Extracted ${events.length} atomic events`);
-  console.log("Thinking:", t1.slice(0, 200), "...\n");
+  let events: AtomicEvent[];
+  let t1: string;
+  try {
+    const result = await pass1Extract(anthropic, raw_text);
+    events = result.events;
+    t1 = result.thinking;
+    console.log(`Extracted ${events.length} atomic events`);
+  } catch (err) {
+    console.error("[Pass 1] Failed:", err);
+    return NextResponse.json({ error: "Failed to extract events from text" }, { status: 500 });
+  }
 
-  if (supabase && inputId) {
+  if (inputId) {
     const rows = events.map((e: AtomicEvent, i: number) => ({
       input_id: inputId,
       date_approx: e.date_approx,
@@ -42,36 +72,55 @@ export async function POST(req: NextRequest) {
       significance: e.significance,
       sort_order: i,
     }));
-    await supabase.from("atomic_events").insert(rows);
+    await dbInsert("atomic_events", rows);
   }
 
   // Pass 2: Atomic events → Timeline + themes
   console.log("--- Pass 2: Compressing to timeline ---");
-  const { timeline, themes, thinking: t2 } = await pass2Compress(anthropic, events);
-  console.log(`Compressed to ${timeline.length} phases, ${themes.length} themes`);
-  console.log("Thinking:", t2.slice(0, 200), "...\n");
+  let timeline: TimelineEvent[];
+  let themes: string[];
+  let t2: string;
+  try {
+    const result = await pass2Compress(anthropic, events);
+    timeline = result.timeline;
+    themes = result.themes;
+    t2 = result.thinking;
+    console.log(`Compressed to ${timeline.length} phases, ${themes.length} themes`);
+  } catch (err) {
+    console.error("[Pass 2] Failed:", err);
+    return NextResponse.json({ error: "Failed to compress timeline" }, { status: 500 });
+  }
 
-  if (supabase && inputId) {
+  if (inputId) {
     const rows = timeline.map((e: TimelineEvent, i: number) => ({
       input_id: inputId,
       time: e.time,
       title: e.title,
       narrative: e.narrative,
+      event_ids: e.event_ids ?? [],
       sort_order: i,
     }));
-    await supabase.from("timeline_events").insert(rows);
+    await dbInsert("timeline_events", rows);
     const themeRows = themes.map((label: string) => ({ input_id: inputId, label }));
-    await supabase.from("themes").insert(themeRows);
+    await dbInsert("themes", themeRows);
   }
 
-  // Pass 3: Timeline → Stable profile
+  // Pass 3: Events + Timeline → Stable profile
   console.log("--- Pass 3: Extracting stable profile ---");
-  const { profile, thinking: t3 } = await pass3Profile(anthropic, events, timeline, themes);
-  console.log("Profile extracted");
-  console.log("Thinking:", t3.slice(0, 200), "...\n");
+  let profile;
+  let t3: string;
+  try {
+    const result = await pass3Profile(anthropic, events, timeline, themes);
+    profile = result.profile;
+    t3 = result.thinking;
+    console.log("Profile extracted");
+  } catch (err) {
+    console.error("[Pass 3] Failed:", err);
+    return NextResponse.json({ error: "Failed to extract profile" }, { status: 500 });
+  }
 
-  if (supabase && inputId) {
-    await supabase.from("profiles").insert({
+  if (inputId) {
+    await dbInsert("profiles", {
       input_id: inputId,
       core_pattern: profile.core_pattern,
       operating_mode: profile.operating_mode,
@@ -90,29 +139,33 @@ export async function POST(req: NextRequest) {
   let t4 = undefined;
   if (intent) {
     console.log("--- Pass 4: Mapping opportunities ---");
-    const result = await pass4Opportunity(anthropic, profile, intent);
-    opportunity = result.opportunity;
-    t4 = result.thinking;
-    console.log("Opportunity profile generated");
-    console.log("Thinking:", t4.slice(0, 200), "...\n");
+    try {
+      const result = await pass4Opportunity(anthropic, profile, intent);
+      opportunity = result.opportunity;
+      t4 = result.thinking;
+      console.log("Opportunity profile generated");
 
-    if (supabase && inputId) {
-      await supabase.from("opportunity_profiles").insert({
-        input_id: inputId,
-        intent: opportunity.intent,
-        opportunity_queries: opportunity.opportunity_queries,
-        likely_buyers: opportunity.likely_buyers,
-        collaboration_matches: opportunity.collaboration_matches,
-        positioning: opportunity.positioning,
-      });
+      if (inputId) {
+        await dbInsert("opportunity_profiles", {
+          input_id: inputId,
+          intent: opportunity.intent,
+          opportunity_queries: opportunity.opportunity_queries,
+          likely_buyers: opportunity.likely_buyers,
+          collaboration_matches: opportunity.collaboration_matches,
+          positioning: opportunity.positioning,
+        });
+      }
+    } catch (err) {
+      console.error("[Pass 4] Failed:", err);
+      // Non-fatal: return what we have without opportunity
     }
   }
 
   // Save all thinking to input record
-  if (supabase && inputId) {
-    await supabase.from("inputs").update({
+  if (inputId) {
+    await dbUpdate("inputs", {
       reasoning: JSON.stringify({ pass1: t1, pass2: t2, pass3: t3, pass4: t4 }),
-    }).eq("id", inputId);
+    }, inputId);
   }
 
   return NextResponse.json({
