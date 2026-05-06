@@ -3,6 +3,7 @@ export interface TimelineEvent {
   time: string;
   title: string;
   narrative: string;
+  event_ids: string[];
 }
 
 export interface AtomicEvent {
@@ -15,16 +16,23 @@ export interface AtomicEvent {
   significance: number;
 }
 
+export interface EvidencedClaim {
+  inference: string;
+  evidence: string[];
+  event_ids: string[];
+  confidence: number;
+}
+
 export interface StableProfile {
-  core_pattern: string;
-  operating_mode: string;
-  obsessions: string[];
-  commercial_surfaces: string[];
-  collaboration_style: string;
-  risk_flags: string[];
-  proof_of_work: string[];
-  network_surface: string[];
-  current_leverage_point: string;
+  core_pattern: EvidencedClaim;
+  operating_mode: EvidencedClaim;
+  obsessions: EvidencedClaim[];
+  commercial_surfaces: EvidencedClaim[];
+  collaboration_style: EvidencedClaim;
+  risk_flags: EvidencedClaim[];
+  proof_of_work: EvidencedClaim[];
+  network_surface: EvidencedClaim[];
+  current_leverage_point: EvidencedClaim;
 }
 
 export interface OpportunityProfile {

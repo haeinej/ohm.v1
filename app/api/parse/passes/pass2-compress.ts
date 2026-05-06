@@ -24,7 +24,7 @@ Rules:
 Return valid JSON only, no markdown wrapping:
 {
   "timeline": [
-    { "id": "unique-id", "time": "time period", "title": "sharp title", "narrative": "2-4 sentences" }
+    { "id": "unique-id", "time": "time period", "title": "sharp title", "narrative": "2-4 sentences", "event_ids": ["atomic-event-id-1", "atomic-event-id-2"] }
   ],
   "themes": ["theme1", "theme2", "theme3"]
 }

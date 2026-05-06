@@ -1,8 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { TimelineEvent, StableProfile } from "@/lib/types";
+import { AtomicEvent, TimelineEvent, StableProfile } from "@/lib/types";
 
 export async function pass3Profile(
   anthropic: Anthropic,
+  events: AtomicEvent[],
   timeline: TimelineEvent[],
   themes: string[]
 ): Promise<{ profile: StableProfile; thinking: string }> {
@@ -13,33 +14,46 @@ export async function pass3Profile(
     messages: [
       {
         role: "user",
-        content: `Analyze this person's trajectory and extract their stable profile. For each field, cite specific evidence from the timeline. No speculation beyond what the data supports.
+        content: `Analyze this person's trajectory and extract their stable profile.
 
-Fields to extract:
-- core_pattern: the fundamental drive or pattern that explains this person's choices (1-2 sentences)
-- operating_mode: how they execute — their working style, decision-making pattern (1-2 sentences)
-- obsessions: what they keep returning to, across different contexts (array of strings)
-- commercial_surfaces: where they can create or capture value — specific domains, skills, markets (array of strings)
-- collaboration_style: how they work with others — leadership style, team dynamics (1-2 sentences)
-- risk_flags: blind spots, failure modes, patterns that could undermine them (array of strings)
-- proof_of_work: what they have actually built, shipped, or achieved — concrete evidence (array of strings)
-- network_surface: communities, institutions, people they are connected to (array of strings)
-- current_leverage_point: their single strongest asset or position right now (1 sentence)
+CRITICAL: Separate evidence from inference. Do NOT collapse them.
+
+For each field, return an object with:
+- evidence: array of raw factual observations. These must be things that literally happened — no interpretation, no poetry, no "quietly outgrowing." Just facts.
+- event_ids: array of atomic event IDs that support this claim (use the exact IDs from the atomic events list)
+- inference: your interpretation of what these facts mean about this person. This CAN be literary and insightful.
+- confidence: 0-1 based on how many independent events support this inference
+
+Fields (single claim): core_pattern, operating_mode, collaboration_style, current_leverage_point
+Fields (array of claims): obsessions, commercial_surfaces, risk_flags, proof_of_work, network_surface
 
 Return valid JSON only, no markdown wrapping:
 {
-  "core_pattern": "...",
-  "operating_mode": "...",
-  "obsessions": ["..."],
-  "commercial_surfaces": ["..."],
-  "collaboration_style": "...",
-  "risk_flags": ["..."],
-  "proof_of_work": ["..."],
-  "network_surface": ["..."],
-  "current_leverage_point": "..."
+  "core_pattern": { "inference": "...", "evidence": ["fact1", "fact2"], "event_ids": ["id1", "id2"], "confidence": 0.85 },
+  "operating_mode": { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.8 },
+  "obsessions": [
+    { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.9 }
+  ],
+  "commercial_surfaces": [
+    { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.7 }
+  ],
+  "collaboration_style": { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.8 },
+  "risk_flags": [
+    { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.6 }
+  ],
+  "proof_of_work": [
+    { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.95 }
+  ],
+  "network_surface": [
+    { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.8 }
+  ],
+  "current_leverage_point": { "inference": "...", "evidence": ["..."], "event_ids": ["..."], "confidence": 0.85 }
 }
 
-Timeline:
+Atomic events:
+${JSON.stringify(events, null, 2)}
+
+Compressed timeline:
 ${JSON.stringify(timeline, null, 2)}
 
 Themes: ${themes.join(", ")}`,

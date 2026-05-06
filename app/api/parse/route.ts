@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
 
   // Pass 3: Timeline → Stable profile
   console.log("--- Pass 3: Extracting stable profile ---");
-  const { profile, thinking: t3 } = await pass3Profile(anthropic, timeline, themes);
+  const { profile, thinking: t3 } = await pass3Profile(anthropic, events, timeline, themes);
   console.log("Profile extracted");
   console.log("Thinking:", t3.slice(0, 200), "...\n");
 
